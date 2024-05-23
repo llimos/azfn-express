@@ -4,11 +4,12 @@
   "description": "Adapter for using an Express app with Azure Functions v4",
   "keywords": ["Azure Functions", "Express", "ExpressJS", "Azure", "serverless", "JAMSTACK"],
   "main": "index.js",
+  "typings": "index.d.ts",
   "repository": "https://github.com/llimos/azfn-express.git",
   "author": "Shimon Lyons <shimonl@duck.com>",
   "license": "MIT",
   "engines": {"node": ">=18"},
-  "files": ["README.md", "LICENSE", "index.js", "index.t.ds"],
+  "files": ["README.md", "LICENSE", "index.js", "index.d.ts"],
   "devDependencies": {
     "typescript": "^5.4.5",
     "express": "4.19.2",
@@ -21,10 +22,5 @@
   },
   "scripts": {
     "build": "tsc"
-  },
-  "publishConfig": {
-    "access": "public",
-    "main": "dist/",
-    "typings": "dist/index"
   }
 }
