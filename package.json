@@ -1,6 +1,6 @@
 {
   "name": "azfn-express",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Adapter for using an Express app with Azure Functions v4",
   "keywords": ["Azure Functions", "Express", "ExpressJS", "Azure", "serverless", "JAMSTACK"],
   "main": "index.js",
