@@ -53,4 +53,4 @@ Two extra properties will be available on the Express request object:
 * `context` - this is the Azure Functions invocation context, used for logging and so on
 * `user` - if using Azure authentication, this will be the user object, if there is one
 
-See the Express documentation for how to handle streaming requests and responses, if you wish to do so. You may also use the Express `send` method, or any other Express funcionality.
+See the Express documentation for how to handle streaming requests and responses, if you wish to do so. You may also use the Express `send` method, or any other Express functionality.
