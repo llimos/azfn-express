@@ -143,15 +143,18 @@ export function register(expressApp: Application, name?: string, options?: Optio
 export function register(expressApp: Application, options: Options): void;
 export function register(expressApp: Application, name?: string | Options, options?: Options): void {
     if (typeof name !== 'string') {
-        options = name;
-        name = 'Api';
+      // `name` is actually `options` - call again with default name
+      return register(expressApp, 'Api', name);
     }
 
-    // Default route which can be overridden, and handler which cannot
+   // Default options which can be overridden, and handler which cannot
+   const defaultOptions: Options = {
+      route: '{*segments}',
+      // Azure docs claim it defaults to all methods, but actually it only defaults to ['GET', 'POST']
+      methods: ['CONNECT', 'DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE']
+   }
     const mergedOptions: HttpFunctionOptions = Object.assign(
-        { route: '{*segments}' }, 
-        options, 
-        {handler: createExpressHandler(expressApp)}
+      defaultOptions, options, { handler: createExpressHandler(expressApp) }
     );
 
     app.setup({ enableHttpStream: true });
