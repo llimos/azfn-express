@@ -11,8 +11,8 @@ import {
     type InvocationContext,
     HttpRequestUser,
 } from '@azure/functions';
-import type { Application } from 'express';
-
+import type { response, Application } from 'express';
+import type { OutgoingHttpHeaders } from 'node:http';
 
 declare module "node:http" {
     interface IncomingMessage {
@@ -20,7 +20,7 @@ declare module "node:http" {
         user: HttpRequestUser | null;
     }
     interface ServerResponse<Request extends IncomingMessage = IncomingMessage> {
-        _headerSent: boolean;
+        _headerSent: boolean; // Exists in implementation
     }
 }
 
@@ -51,15 +51,15 @@ export function createExpressHandler(app: Application): HttpHandler {
          req.context = context;
 
          // Create a ServerResponse for Express
-         const res = new ServerResponse(req).on('error', reject);
+         // It's not actually a `response` yet, but Express will swap the prototype
+         const res = new ServerResponse(req).on('error', reject) as typeof response;
 
          // Readable stream to return to Azure
          let responseStreamController: ReadableStreamController<Buffer>;
 
          // Override the part that actually sends the data, to send it to Azure instead
-         // We need to override both of these - `write` is used for streaming and `_send` for Express's `send`
          res.write = function write(
-            this: ServerResponse,
+            this: typeof response,
             data,
             encoding?: BufferEncoding | undefined | ((error?: Error | null | undefined) => void),
             callback?: (error?: Error | null | undefined) => void,
@@ -70,31 +70,27 @@ export function createExpressHandler(app: Application): HttpHandler {
                encoding = undefined;
             }
 
-            // When Express decides to write the headers, return the response to Azure including the body as a stream
-            if (!this._headerSent) {
-               // Return to Azure immediately
-               // If there is a response body, it will be streamed
-               resolve(
-                  new HttpResponse({
-                     status: this.statusCode,
-                     headers: this.getHeaders() as Record<
-                        string,
-                        string | string[]
-                     >,
-                     body: data
-                        ? new ReadableStream<Buffer>({
-                             start: controller =>
-                                (responseStreamController = controller),
-                          })
-                        : null,
-                  }),
-               );
-
-               this._headerSent = true;
-            }
-
-            // Write the data, if any
+            // If there's no data, don't do anything
             if (data) {
+               // Return the response to Azure including the body as a stream
+               if (!responseStreamController) {
+                  // Return to Azure immediately
+                  // If there is a response body, it will be streamed
+                  resolve(
+                     new HttpResponse({
+                        status: this.statusCode,
+                        headers: mapHeaders(this.getHeaders()),
+                        body: new ReadableStream<Buffer>({
+                           start: controller => responseStreamController = controller
+                        }),
+                     }),
+                  );
+
+                  // Internal property; might be used somewhere else
+                  this._headerSent = true;
+               }
+
+               // Write the data
                responseStreamController.enqueue(data);
             }
 
@@ -105,7 +101,7 @@ export function createExpressHandler(app: Application): HttpHandler {
          };
 
          res.end = function end(
-            this: ServerResponse,
+            this: typeof response,
             data?,
             encoding?: BufferEncoding | ((error?: Error | null | undefined) => void),
             callback?: (error?: Error | null | undefined) => void,
@@ -119,11 +115,33 @@ export function createExpressHandler(app: Application): HttpHandler {
                encoding = undefined;
             }
 
-            this.write(data, encoding as BufferEncoding);
-            responseStreamController?.close();
+            if (!responseStreamController) {
+               // This is the first and only chunk, don't bother with streams
+               resolve({
+                  status: this.statusCode,
+                  headers: mapHeaders(this.getHeaders()),
+                  body: data || null // Handle it being ''. It won't be 0.
+               });
+
+               this._headerSent = true;
+
+            } else {
+               // This is not the first chunk. Write the chunk and close the stream
+               if (data) {
+                  responseStreamController.enqueue(data);
+               }
+
+               responseStreamController.close();
+               
+            }
 
             callback?.();
 
+            // Emit Express events
+            this.emit('finish');
+            this.emit('close');
+
+            // Return `this` to allow chaining, like in Express
             return this;
          };
 
@@ -137,15 +155,29 @@ export function createExpressHandler(app: Application): HttpHandler {
    };
 }
 
+function mapHeaders(expressHeaders: OutgoingHttpHeaders): Headers {
+   const headers = new Headers;
+   for (const [k, v] of Object.entries(expressHeaders)) {
+      if (Array.isArray(v)) {
+         for (const e of v) {
+            headers.append(k, e);
+         }
+      } else if (v) {
+         headers.set(k, String(v));
+      }
+   }
+   return headers;
+}
+
 
 type Options = Omit<HttpFunctionOptions, 'handler'>;
 export function register(expressApp: Application, name?: string, options?: Options): void;
 export function register(expressApp: Application, options: Options): void;
 export function register(expressApp: Application, name?: string | Options, options?: Options): void {
-    if (typeof name !== 'string') {
+   if (typeof name !== 'string') {
       // `name` is actually `options` - call again with default name
       return register(expressApp, 'Api', name);
-    }
+   }
 
    // Default options which can be overridden, and handler which cannot
    const defaultOptions: Options = {
@@ -153,10 +185,10 @@ export function register(expressApp: Application, name?: string | Options, optio
       // Azure docs claim it defaults to all methods, but actually it only defaults to ['GET', 'POST']
       methods: ['CONNECT', 'DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT', 'TRACE']
    }
-    const mergedOptions: HttpFunctionOptions = Object.assign(
+   const mergedOptions: HttpFunctionOptions = Object.assign(
       defaultOptions, options, { handler: createExpressHandler(expressApp) }
-    );
+   );
 
-    app.setup({ enableHttpStream: true });
-    app.http(name, mergedOptions)
+   app.setup({ enableHttpStream: true });
+   app.http(name, mergedOptions)
 }
